@@ -93,15 +93,22 @@ void Engine::CreateRootSignature()
 	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 	// texture
-	D3D12_DESCRIPTOR_RANGE descriptorRanges[1];
+	D3D12_DESCRIPTOR_RANGE descriptorRanges[2];
 	descriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	descriptorRanges[0].NumDescriptors = 1;
 	descriptorRanges[0].BaseShaderRegister = 0;
-	descriptorRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 	descriptorRanges[0].RegisterSpace = 0;
+	descriptorRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+	// depth buffer texture
+	descriptorRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	descriptorRanges[1].NumDescriptors = 1;
+	descriptorRanges[1].BaseShaderRegister = 1;
+	descriptorRanges[1].RegisterSpace = 1;
+	descriptorRanges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
 	D3D12_ROOT_DESCRIPTOR_TABLE descriptorTable;
-	descriptorTable.NumDescriptorRanges = 1;
+	descriptorTable.NumDescriptorRanges = _countof(descriptorRanges);
 	descriptorTable.pDescriptorRanges = &descriptorRanges[0];
 
 	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -182,6 +189,28 @@ void Engine::LoadShaders()
 		OutputDebugStringA(errorMsgStr);
 		exit(-1);
 	}
+
+	ComPtr<ID3DBlob> psDepthErrorMsgs;
+	hr = D3DCompileFromFile(
+		TEXT("Shaders.hlsl"), nullptr, nullptr, "psDepth", "ps_5_0", compileFlags, 0, &m_lightPixelShader, &psDepthErrorMsgs);
+
+	if (FAILED(hr))
+	{
+		char* errorMsgStr = reinterpret_cast<char*>(psDepthErrorMsgs->GetBufferPointer());
+		OutputDebugStringA(errorMsgStr);
+		exit(-1);
+	}
+
+	ComPtr<ID3DBlob> vsDepthErrorMsgs;
+	hr = D3DCompileFromFile(
+		TEXT("Shaders.hlsl"), nullptr, nullptr, "vsDepth", "vs_5_0", compileFlags, 0, &m_lightVertexShader, &vsDepthErrorMsgs);
+
+	if (FAILED(hr))
+	{
+		char* errorMsgStr = reinterpret_cast<char*>(psDepthErrorMsgs->GetBufferPointer());
+		OutputDebugStringA(errorMsgStr);
+		exit(-1);
+	}
 }
 
 void Engine::LoadTextures()
@@ -233,7 +262,9 @@ void Engine::LoadTextures()
 		exit(-1);
 	}
 
-	UINT textureSize = textureWidth * textureHeight * 4;
+	const UINT bytesPerPixel = 4;
+
+	UINT textureSize = textureWidth * textureHeight * bytesPerPixel;
 	if (textureSize == 0)
 	{
 		exit(-1);
@@ -248,7 +279,6 @@ void Engine::LoadTextures()
 
 	m_textureData = std::make_unique<BYTE[]>(textureSize);
 
-	const UINT bytesPerPixel = 4;
 	UINT bytesPerRow = textureWidth * bytesPerPixel;
 	hr = frame->CopyPixels(nullptr, bytesPerRow, textureSize, m_textureData.get());
 
@@ -357,7 +387,7 @@ void Engine::CreatePipelineStateObject()
 	};
 
 	D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-	inputLayoutDesc.NumElements = sizeof(inputLayout) / sizeof(D3D12_INPUT_ELEMENT_DESC);
+	inputLayoutDesc.NumElements = _countof(inputLayout);
 	inputLayoutDesc.pInputElementDescs = inputLayout;
 
 	// shaders
@@ -389,6 +419,55 @@ void Engine::CreatePipelineStateObject()
 	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
 	HRESULT hr = m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState));
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+}
+
+void Engine::CreateLightPso()
+{
+	// input layout
+	D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
+	inputLayoutDesc.NumElements = _countof(inputLayout);
+	inputLayoutDesc.pInputElementDescs = inputLayout;
+
+	// shaders
+	D3D12_SHADER_BYTECODE vertexShaderBytecode = {};
+	vertexShaderBytecode.BytecodeLength = m_lightVertexShader->GetBufferSize();
+	vertexShaderBytecode.pShaderBytecode = m_lightVertexShader->GetBufferPointer();
+
+	D3D12_SHADER_BYTECODE pixelShaderBytecode = {};
+	pixelShaderBytecode.BytecodeLength = m_lightPixelShader->GetBufferSize();
+	pixelShaderBytecode.pShaderBytecode = m_lightPixelShader->GetBufferPointer();
+
+	// sample desc
+	DXGI_SAMPLE_DESC sampleDesc = {};
+	sampleDesc.Count = 1;
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = inputLayoutDesc;
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = vertexShaderBytecode;
+	psoDesc.PS = pixelShaderBytecode;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.SampleDesc = sampleDesc;
+	psoDesc.SampleMask = 0xffffffff;
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+	HRESULT hr = m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_lightPipelineState));
 	if (FAILED(hr))
 	{
 		exit(-1);
@@ -524,11 +603,8 @@ void Engine::CreateVertexBuffer()
 		exit(-1);
 	}
 
-	hr = m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsDescriptorHeap));
-	if (FAILED(hr))
-	{
-		exit(-1);
-	}
+	m_dsBuffer->SetName(TEXT("DS Buffer"));
+
 	m_dsDescriptorHeap->SetName(L"Depth Stencil Resource Heap");
 
 	m_device->CreateDepthStencilView(m_dsBuffer.Get(), &depthStencilDesc, m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
@@ -536,7 +612,7 @@ void Engine::CreateVertexBuffer()
 	// execute command list to upload initial assets
 	m_commandList->Close();
 
-	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+	ID3D12CommandList* ppCommandLists[] = { m_lightCommandList.Get(), m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 	m_fenceValue++;
 	hr = m_commandQueue->Signal(m_fence.Get(), m_fenceValue);
@@ -554,6 +630,49 @@ void Engine::CreateVertexBuffer()
 	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
 	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 	m_indexBufferView.SizeInBytes = iBufferSize;
+}
+
+void Engine::CreateLightDepthBuffer()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+	dsvHeapDesc.NumDescriptors = 1;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+	HRESULT hr = m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsLightDescriptorHeap));
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	m_dsLightDescriptorHeap->SetName(L"Depth Stencil Light Descriptor Heap");
+
+	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
+	depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
+
+	D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
+	depthOptimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+	depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
+	depthOptimizedClearValue.DepthStencil.Stencil = 0;
+
+	hr = m_device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_resolutionWidth, m_resolutionHeight, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+		D3D12_RESOURCE_STATE_DEPTH_WRITE,
+		&depthOptimizedClearValue,
+		IID_PPV_ARGS(&m_dsLightBuffer)
+	);
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	m_dsLightBuffer->SetName(TEXT("Light DS buffer"));
+
+	m_device->CreateDepthStencilView(m_dsLightBuffer.Get(), &depthStencilDesc, m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 }
 
 void Engine::FillOutViewportAndScissorRect()
@@ -631,6 +750,14 @@ void Engine::InitWvp()
 	const float fov = 60.0f * (XM_PI / 180.0f);
 	m_camera.SetFov(fov);
 
+	// light direction
+	const XMFLOAT3 lightRotation(XM_PIDIV4, XM_PIDIV4, 0.0f);
+	m_light.SetRotation(&lightRotation);
+	m_light.SetProperties(XM_PIDIV4, 1000.0f);
+
+	const XMFLOAT3 lightTranslation(-80.0f, 120.0f, -80.0f);
+	m_light.SetTranslation(&lightTranslation);
+
 	const float aspectRatio = static_cast<float>(m_resolutionWidth) / static_cast<float>(m_resolutionHeight);
 	m_camera.SetAspectRatio(aspectRatio);
 
@@ -638,9 +765,14 @@ void Engine::InitWvp()
 	XMMATRIX wvpMat = m_actor.GetWorldMat() * m_camera.GetViewProjectionMat();
 	XMMATRIX wvpTransposedMat = XMMatrixTranspose(wvpMat);
 
+	XMMATRIX lightWvpMat = m_actor.GetWorldMat() * m_light.GetViewProjectionMat();
+	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
+
 	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
+	XMStoreFloat3(&m_wvpData.lightVec, m_light.GetDirection());	
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpTransposedMat);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
+	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
 }
 
 void Engine::UpdateWvp(float deltaSec)
@@ -701,9 +833,14 @@ void Engine::UpdateWvp(float deltaSec)
 	XMMATRIX wvpMat = m_actor.GetWorldMat() * m_camera.GetViewProjectionMat();
 	XMMATRIX wvpMatTransposed = XMMatrixTranspose(wvpMat);
 
+	XMMATRIX lightWvpMat = m_actor.GetWorldMat() * m_light.GetViewProjectionMat();
+	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
+
 	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
+	XMStoreFloat3(&m_wvpData.lightVec, m_light.GetDirection());
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpMatTransposed);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
+	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
 }
 
 void Engine::Init(HWND hwnd)
@@ -822,6 +959,22 @@ void Engine::Init(HWND hwnd)
 		exit(-1);
 	}
 
+	// create light command allocator
+	hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_lightCommandAllocator));
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	// create light command list
+	hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_lightCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_lightCommandList));
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	m_lightCommandList->Close();
+
 	// create fence
 	hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
 	if (FAILED(hr))
@@ -839,9 +992,11 @@ void Engine::Init(HWND hwnd)
 	CreateRootSignature();
 	LoadShaders();
 	CreatePipelineStateObject();
+	CreateLightPso();
 	LoadTextures();
 	InitWvp();
 	CreateConstantBuffers();
+	CreateLightDepthBuffer();
 	CreateVertexBuffer();
 	FillOutViewportAndScissorRect();
 
@@ -887,64 +1042,114 @@ void Engine::ResizeViewport(UINT resolutionWidth, UINT resolutionHeight)
 
 void Engine::Render()
 {
+	// ----------- light depth -----------
+	{
+		HRESULT hr = m_lightCommandAllocator->Reset();
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
+
+		hr = m_lightCommandList->Reset(m_lightCommandAllocator.Get(), m_lightPipelineState.Get());
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
+
+		// indicate that the back buffer will be used as a render target
+		m_lightCommandList->ResourceBarrier(1,
+			&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+		CD3DX12_CPU_DESCRIPTOR_HANDLE lightDsvHandle(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+		// record commands
+		m_lightCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &lightDsvHandle);
+		const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		m_lightCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		m_lightCommandList->ClearDepthStencilView(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+		m_lightCommandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+		// constant buffer descriptor heap
+		ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
+		m_lightCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		m_lightCommandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
+		m_lightCommandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+		m_lightCommandList->RSSetViewports(1, &m_viewport);
+		m_lightCommandList->RSSetScissorRects(1, &m_scissorRect);
+		m_lightCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_lightCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+		m_lightCommandList->IASetIndexBuffer(&m_indexBufferView);
+		m_lightCommandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
+
+		hr = m_lightCommandList->Close();
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
+	}
+
+
+	// -----------------------
+
 	// reset command allocator and command list
-	HRESULT hr = m_commandAllocator->Reset();
-	if (FAILED(hr))
 	{
-		exit(-1);
-	}
+		HRESULT hr = m_commandAllocator->Reset();
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
 
-	hr = m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get());
-	if (FAILED(hr))
-	{
-		exit(-1);
-	}
+		hr = m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get());
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
 
-	// indicate that the back buffer will be used as a render target
-	m_commandList->ResourceBarrier(1, 
-		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
-	CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+		// record commands
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+		m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		const float clearColor[] = { 0.5f, 0.5f, 0.5f, 1.0f };
+		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		m_commandList->ClearDepthStencilView(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-	// record commands
-	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-	const float clearColor[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	m_commandList->ClearDepthStencilView(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		// draw triangle
+		m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
-	// draw triangle
-	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+		// constant buffer descriptor heap
+		ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
+		m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		m_commandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
+		m_commandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-	// constant buffer descriptor heap
-	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
-	m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	m_commandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
-	m_commandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		m_commandList->RSSetViewports(1, &m_viewport);
+		m_commandList->RSSetScissorRects(1, &m_scissorRect);
+		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+		m_commandList->IASetIndexBuffer(&m_indexBufferView);
+		m_commandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
 
-	m_commandList->RSSetViewports(1, &m_viewport);
-	m_commandList->RSSetScissorRects(1, &m_scissorRect);
-	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
+		// indicate that the back buffer will be used to present
+		m_commandList->ResourceBarrier(1,
+			&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
-	// indicate that the back buffer will be used to present
-	m_commandList->ResourceBarrier(1, 
-		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
-	hr = m_commandList->Close();
-	if (FAILED(hr))
-	{
-		exit(-1);
+		hr = m_commandList->Close();
+		if (FAILED(hr))
+		{
+			exit(-1);
+		}
 	}
 
 	// execute command list
-	ID3D12CommandList* ppCommandLists[]{ m_commandList.Get() };
+	ID3D12CommandList* ppCommandLists[]{ m_lightCommandList.Get(), m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	// present the frame
-	hr = m_swapChain->Present(1, 0);
+	HRESULT hr = m_swapChain->Present(1, 0);
 	if (FAILED(hr))
 	{
 		exit(-1);

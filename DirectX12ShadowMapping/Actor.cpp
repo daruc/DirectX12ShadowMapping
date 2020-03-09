@@ -48,7 +48,7 @@ void Actor::RotateYaw(float radians)
 	UpdateTransformationMat();
 }
 
-void Actor::SetTranslationVec(const XMFLOAT3 * const translationVec)
+void Actor::SetTranslation(const XMFLOAT3 * const translationVec)
 {
 	m_translationVec = XMLoadFloat3(translationVec);
 	UpdateTransformationMat();

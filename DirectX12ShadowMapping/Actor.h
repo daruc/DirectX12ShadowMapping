@@ -28,7 +28,7 @@ public:
 	void SetRotation(const XMFLOAT3* const rotationVec);
 	void RotateRoll(float radians);
 	void RotateYaw(float radians);
-	void SetTranslationVec(const XMFLOAT3* const translationVec);
+	void SetTranslation(const XMFLOAT3* const translationVec);
 	XMMATRIX GetWorldMat() const;
 	void LoadObjFromFile(const wchar_t* const fileName);
 	void ClearObj();

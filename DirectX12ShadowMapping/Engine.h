@@ -13,6 +13,7 @@
 #include <memory>
 #include "Camera.h"
 #include "Actor.h"
+#include "Light.h"
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -29,6 +30,10 @@ struct Wvp
 	XMFLOAT4X4 world;
 	XMFLOAT4X4 wvp;
 	XMFLOAT3 cameraPos;
+	BYTE padding[4];
+	XMFLOAT3 lightVec;
+	BYTE padding2[4];
+	XMFLOAT4X4 lightWvp;
 };
 
 extern const XMVECTOR X_UNIT_VEC;
@@ -51,7 +56,10 @@ private:
 
 	ComPtr<ID3D12CommandAllocator> m_commandAllocator;
 	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	ComPtr<ID3D12CommandAllocator> m_lightCommandAllocator;
+	ComPtr<ID3D12GraphicsCommandList> m_lightCommandList;
 	ComPtr<ID3D12PipelineState> m_pipelineState;
+	ComPtr<ID3D12PipelineState> m_lightPipelineState;
 	ComPtr<ID3D12Resource> m_renderTarget[2];
 	ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
 	ComPtr<ID3D12CommandQueue> m_commandQueue;
@@ -72,12 +80,17 @@ private:
 
 	ComPtr<ID3DBlob> m_vertexShader;
 	ComPtr<ID3DBlob> m_pixelShader;
+	ComPtr<ID3DBlob> m_lightPixelShader;
+	ComPtr<ID3DBlob> m_lightVertexShader;
 	D3D12_VIEWPORT m_viewport;
 	D3D12_RECT m_scissorRect;
 
 	// depth/stencil buffer
 	ComPtr<ID3D12DescriptorHeap> m_dsDescriptorHeap;
 	ComPtr<ID3D12Resource> m_dsBuffer;
+
+	ComPtr<ID3D12DescriptorHeap> m_dsLightDescriptorHeap;
+	ComPtr<ID3D12Resource> m_dsLightBuffer;
 
 	// constant buffers
 	ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap[2];
@@ -87,6 +100,7 @@ private:
 	UINT8* m_cbWvpGpuAddress[2];
 
 	Actor m_actor;
+	Light m_light;
 	Camera m_camera;
 
 	// textures
@@ -107,6 +121,8 @@ private:
 	void LoadShaders();
 	void LoadTextures();
 	void CreatePipelineStateObject();
+	void CreateLightPso();
+	void CreateLightDepthBuffer();
 	void CreateVertexBuffer();
 	void FillOutViewportAndScissorRect();
 	void InitWvp();
