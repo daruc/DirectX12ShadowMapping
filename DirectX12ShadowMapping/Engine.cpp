@@ -104,7 +104,7 @@ void Engine::CreateRootSignature()
 	descriptorRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	descriptorRanges[1].NumDescriptors = 1;
 	descriptorRanges[1].BaseShaderRegister = 1;
-	descriptorRanges[1].RegisterSpace = 1;
+	descriptorRanges[1].RegisterSpace = 0;
 	descriptorRanges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
 	D3D12_ROOT_DESCRIPTOR_TABLE descriptorTable;
@@ -152,6 +152,79 @@ void Engine::CreateRootSignature()
 	}
 	
 	hr = m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature));
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+}
+
+void Engine::CreateLightRootSignature()
+{
+	// WVP matrix
+	D3D12_ROOT_DESCRIPTOR rootDescriptor;
+	rootDescriptor.ShaderRegister = 0;
+	rootDescriptor.RegisterSpace = 0;
+
+	D3D12_ROOT_PARAMETER rootParameters[2];
+
+	// WVP matrix
+	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	rootParameters[0].Descriptor = rootDescriptor;
+	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+	// texture
+	D3D12_DESCRIPTOR_RANGE descriptorRanges[1];
+	descriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	descriptorRanges[0].NumDescriptors = 1;
+	descriptorRanges[0].BaseShaderRegister = 0;
+	descriptorRanges[0].RegisterSpace = 0;
+	descriptorRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+	D3D12_ROOT_DESCRIPTOR_TABLE descriptorTable;
+	descriptorTable.NumDescriptorRanges = _countof(descriptorRanges);
+	descriptorTable.pDescriptorRanges = &descriptorRanges[0];
+
+	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootParameters[1].DescriptorTable = descriptorTable;
+	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	// sampler
+	D3D12_STATIC_SAMPLER_DESC sampler = {};
+	sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	sampler.MipLODBias = 0;
+	sampler.MaxAnisotropy = 0;
+	sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+	sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+	sampler.MinLOD = 0.0f;
+	sampler.MaxLOD = D3D12_FLOAT32_MAX;
+	sampler.ShaderRegister = 0;
+	sampler.RegisterSpace = 0;
+	sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
+
+	rootSignatureDesc.Init(_countof(rootParameters),
+		rootParameters,
+		1,
+		&sampler,
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+		D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+		D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS
+	);
+
+	ID3DBlob* errorBuffer;
+	ID3DBlob* signature;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &errorBuffer);
+	if (FAILED(hr))
+	{
+		OutputDebugStringA((char*)errorBuffer->GetBufferPointer());
+		exit(-1);
+	}
+
+	hr = m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_lightRootSignature));
 	if (FAILED(hr))
 	{
 		exit(-1);
@@ -333,7 +406,7 @@ void Engine::LoadTextures()
 	// SRV descriptor heap
 	D3D12_DESCRIPTOR_HEAP_DESC srvDescriptorHeapDesc = {};
 	srvDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	srvDescriptorHeapDesc.NumDescriptors = 1;
+	srvDescriptorHeapDesc.NumDescriptors = 2;
 	srvDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 
 	hr = m_device->CreateDescriptorHeap(&srvDescriptorHeapDesc, IID_PPV_ARGS(&m_textureDescriptorHeap));
@@ -343,7 +416,7 @@ void Engine::LoadTextures()
 		exit(-1);
 	}
 
-	m_textureDescriptorHeap->SetName(TEXT("Texture Descriptor Heap"));
+	m_textureDescriptorHeap->SetName(TEXT("Textures Descriptor Heap"));
 
 	// SRV descriptor
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -356,6 +429,29 @@ void Engine::LoadTextures()
 		m_textureDefaultHeap.Get(),
 		&srvDesc,
 		m_textureDescriptorHeap->GetCPUDescriptorHandleForHeapStart()
+	);
+
+	// light depth
+	// SRV descriptor
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvLightDepthTextDesc = {};
+	srvLightDepthTextDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvLightDepthTextDesc.Format = DXGI_FORMAT_R32_FLOAT;
+	srvLightDepthTextDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvLightDepthTextDesc.Texture2D.MipLevels = 1;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE textureDescriptorHeapStart = m_textureDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	UINT srvHandleDescriptorIncrementSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE lightCPUDescriptorHandle(
+		textureDescriptorHeapStart,
+		1,
+		srvHandleDescriptorIncrementSize
+	);
+
+	m_device->CreateShaderResourceView(
+		m_dsLightBuffer.Get(),
+		&srvLightDepthTextDesc,
+		lightCPUDescriptorHandle
 	);
 
 	// store texture in upload heap
@@ -454,7 +550,7 @@ void Engine::CreateLightPso()
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.InputLayout = inputLayoutDesc;
-	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.pRootSignature = m_lightRootSignature.Get();
 	psoDesc.VS = vertexShaderBytecode;
 	psoDesc.PS = pixelShaderBytecode;
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -769,10 +865,10 @@ void Engine::InitWvp()
 	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
 
 	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
-	XMStoreFloat3(&m_wvpData.lightVec, m_light.GetDirection());	
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpTransposedMat);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
 	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
+	XMStoreFloat3(&m_wvpData.lightWorldPos, m_light.GetTranslation());
 }
 
 void Engine::UpdateWvp(float deltaSec)
@@ -837,10 +933,10 @@ void Engine::UpdateWvp(float deltaSec)
 	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
 
 	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
-	XMStoreFloat3(&m_wvpData.lightVec, m_light.GetDirection());
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpMatTransposed);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
 	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
+	XMStoreFloat3(&m_wvpData.lightWorldPos, m_light.GetTranslation());
 }
 
 void Engine::Init(HWND hwnd)
@@ -990,13 +1086,14 @@ void Engine::Init(HWND hwnd)
 	}
 
 	CreateRootSignature();
+	CreateLightRootSignature();
 	LoadShaders();
 	CreatePipelineStateObject();
 	CreateLightPso();
+	CreateLightDepthBuffer();
 	LoadTextures();
 	InitWvp();
 	CreateConstantBuffers();
-	CreateLightDepthBuffer();
 	CreateVertexBuffer();
 	FillOutViewportAndScissorRect();
 
@@ -1042,107 +1139,8 @@ void Engine::ResizeViewport(UINT resolutionWidth, UINT resolutionHeight)
 
 void Engine::Render()
 {
-	// ----------- light depth -----------
-	{
-		HRESULT hr = m_lightCommandAllocator->Reset();
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-
-		hr = m_lightCommandList->Reset(m_lightCommandAllocator.Get(), m_lightPipelineState.Get());
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-
-		// indicate that the back buffer will be used as a render target
-		m_lightCommandList->ResourceBarrier(1,
-			&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE lightDsvHandle(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-		// record commands
-		m_lightCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &lightDsvHandle);
-		const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		m_lightCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		m_lightCommandList->ClearDepthStencilView(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-		m_lightCommandList->SetGraphicsRootSignature(m_rootSignature.Get());
-
-		// constant buffer descriptor heap
-		ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
-		m_lightCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-		m_lightCommandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
-		m_lightCommandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
-		m_lightCommandList->RSSetViewports(1, &m_viewport);
-		m_lightCommandList->RSSetScissorRects(1, &m_scissorRect);
-		m_lightCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_lightCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-		m_lightCommandList->IASetIndexBuffer(&m_indexBufferView);
-		m_lightCommandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
-
-		hr = m_lightCommandList->Close();
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-	}
-
-
-	// -----------------------
-
-	// reset command allocator and command list
-	{
-		HRESULT hr = m_commandAllocator->Reset();
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-
-		hr = m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get());
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-		// record commands
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
-		m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-		const float clearColor[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		m_commandList->ClearDepthStencilView(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-		// draw triangle
-		m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-
-		// constant buffer descriptor heap
-		ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
-		m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-		m_commandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
-		m_commandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
-		m_commandList->RSSetViewports(1, &m_viewport);
-		m_commandList->RSSetScissorRects(1, &m_scissorRect);
-		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-		m_commandList->IASetIndexBuffer(&m_indexBufferView);
-		m_commandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
-
-		// indicate that the back buffer will be used to present
-		m_commandList->ResourceBarrier(1,
-			&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
-		hr = m_commandList->Close();
-		if (FAILED(hr))
-		{
-			exit(-1);
-		}
-	}
+	RenderLightDepth();
+	RenderScene();
 
 	// execute command list
 	ID3D12CommandList* ppCommandLists[]{ m_lightCommandList.Get(), m_commandList.Get() };
@@ -1156,6 +1154,105 @@ void Engine::Render()
 	}
 
 	WaitForPreviousFrame();
+}
+
+void Engine::RenderScene()
+{
+	HRESULT hr = m_commandAllocator->Reset();
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	hr = m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get());
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// record commands
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+	const float clearColor[] = { 0.5f, 0.5f, 0.5f, 1.0f };
+	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	m_commandList->ClearDepthStencilView(m_dsDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+	// draw triangle
+	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+	// constant buffer descriptor heap
+	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
+	m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	m_commandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
+	m_commandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+	m_commandList->RSSetViewports(1, &m_viewport);
+	m_commandList->RSSetScissorRects(1, &m_scissorRect);
+	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+	m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	m_commandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
+
+	// indicate that the back buffer will be used to present
+	m_commandList->ResourceBarrier(1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	hr = m_commandList->Close();
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+}
+
+void Engine::RenderLightDepth()
+{
+	HRESULT hr = m_lightCommandAllocator->Reset();
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	hr = m_lightCommandList->Reset(m_lightCommandAllocator.Get(), m_lightPipelineState.Get());
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
+
+	// indicate that the back buffer will be used as a render target
+	m_lightCommandList->ResourceBarrier(1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE lightDsvHandle(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// record commands
+	m_lightCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &lightDsvHandle);
+	const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	m_lightCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	m_lightCommandList->ClearDepthStencilView(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+	m_lightCommandList->SetGraphicsRootSignature(m_lightRootSignature.Get());
+
+	// constant buffer descriptor heap
+	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
+	m_lightCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	m_lightCommandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
+	m_lightCommandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+	m_lightCommandList->RSSetViewports(1, &m_viewport);
+	m_lightCommandList->RSSetScissorRects(1, &m_scissorRect);
+	m_lightCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_lightCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+	m_lightCommandList->IASetIndexBuffer(&m_indexBufferView);
+	m_lightCommandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
+
+	hr = m_lightCommandList->Close();
+	if (FAILED(hr))
+	{
+		exit(-1);
+	}
 }
 
 void Engine::Destroy()

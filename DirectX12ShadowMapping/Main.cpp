@@ -29,6 +29,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow
 		exit(-1);
 	}
 
+	RECT windowRect;
+	windowRect.left = 0;
+	windowRect.top = 0;
+	windowRect.right = g_width;
+	windowRect.bottom = g_height;
+
+	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, false);
+
 	HWND hwnd = CreateWindowEx(
 		0,
 		WND_CLASS_NAME,

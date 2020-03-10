@@ -25,6 +25,5 @@ public:
 	XMVECTOR GetTranslation() const;
 	XMVECTOR GetDirection() const;
 	XMMATRIX GetViewProjectionMat() const;
-
 };
 

@@ -31,9 +31,8 @@ struct Wvp
 	XMFLOAT4X4 wvp;
 	XMFLOAT3 cameraPos;
 	BYTE padding[4];
-	XMFLOAT3 lightVec;
-	BYTE padding2[4];
 	XMFLOAT4X4 lightWvp;
+	XMFLOAT3 lightWorldPos;
 };
 
 extern const XMVECTOR X_UNIT_VEC;
@@ -69,6 +68,7 @@ private:
 
 	// drawing triangles
 	ComPtr<ID3D12RootSignature> m_rootSignature;
+	ComPtr<ID3D12RootSignature> m_lightRootSignature;
 
 	ComPtr<ID3D12Resource> m_vertexBuffer;
 	ComPtr<ID3D12Resource> m_vBufferUploadHeap;
@@ -118,17 +118,20 @@ private:
 	void WaitForPreviousFrame();
 
 	void CreateRootSignature();
+	void CreateLightRootSignature();
 	void LoadShaders();
+	void CreateLightDepthBuffer();
 	void LoadTextures();
 	void CreatePipelineStateObject();
 	void CreateLightPso();
-	void CreateLightDepthBuffer();
 	void CreateVertexBuffer();
 	void FillOutViewportAndScissorRect();
 	void InitWvp();
 	void UpdateWvp(float deltaSec);
 	void CreateConstantBuffers();
 
+	void RenderLightDepth();
+	void RenderScene();
 public:
 
 	Engine(UINT resolutionWidth, UINT resolutionHeight);
@@ -139,5 +142,6 @@ public:
 	void Update();
 	void ResizeViewport(UINT resolutionWidth, UINT resolutionHeight);
 	void Render();
+
 	void Destroy();
 };
