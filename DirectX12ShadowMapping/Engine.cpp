@@ -85,7 +85,7 @@ void Engine::CreateRootSignature()
 	rootDescriptor.ShaderRegister = 0;
 	rootDescriptor.RegisterSpace = 0;
 
-	D3D12_ROOT_PARAMETER rootParameters[2];
+	D3D12_ROOT_PARAMETER rootParameters[3];
 
 	// WVP matrix
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -114,6 +114,23 @@ void Engine::CreateRootSignature()
 	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	rootParameters[1].DescriptorTable = descriptorTable;
 	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	// sampler for shadow mapping
+
+	D3D12_DESCRIPTOR_RANGE lightDepthRange;
+	lightDepthRange.BaseShaderRegister = 1;
+	lightDepthRange.NumDescriptors = 1;
+	lightDepthRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+	lightDepthRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+	lightDepthRange.RegisterSpace = 0;
+
+	D3D12_ROOT_DESCRIPTOR_TABLE lightDepthTable;
+	lightDepthTable.NumDescriptorRanges = 1;
+	lightDepthTable.pDescriptorRanges = &lightDepthRange;
+
+	rootParameters[2].DescriptorTable = lightDepthTable;
+	rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 	// sampler
 	D3D12_STATIC_SAMPLER_DESC sampler = {};
@@ -836,6 +853,26 @@ void Engine::CreateConstantBuffers()
 	}
 }
 
+void Engine::CreateSamplers()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
+	descriptorHeapDesc.NumDescriptors = 1;
+	descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+
+	m_device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&m_lightSamplerDescriptorHeap));
+
+	D3D12_SAMPLER_DESC lightSamplerDesc = {};
+	lightSamplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+	lightSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	lightSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	lightSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	lightSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS;
+	lightSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+
+	m_device->CreateSampler(&lightSamplerDesc, m_lightSamplerDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+}
+
 void Engine::InitWvp()
 {
 	// view
@@ -1095,6 +1132,7 @@ void Engine::Init(HWND hwnd)
 	InitWvp();
 	CreateConstantBuffers();
 	CreateVertexBuffer();
+	CreateSamplers();
 	FillOutViewportAndScissorRect();
 
 	WaitForPreviousFrame();
@@ -1183,10 +1221,11 @@ void Engine::RenderScene()
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
 	// constant buffer descriptor heap
-	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
+	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get(), m_lightSamplerDescriptorHeap.Get() };
 	m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	m_commandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
 	m_commandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+	m_commandList->SetGraphicsRootDescriptorTable(2, m_lightSamplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
 	m_commandList->RSSetViewports(1, &m_viewport);
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);

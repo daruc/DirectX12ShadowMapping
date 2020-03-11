@@ -26,6 +26,7 @@ cbuffer WvpConstantBuffer : register(b0)
 Texture2D tex : register(t0);
 Texture2D depthTex : register(t1);
 SamplerState samplerState : register(s0);
+SamplerComparisonState cmpSampler : register(s1);
 
 VS_OUTPUT vsMain(VS_INPUT input)
 {
@@ -57,11 +58,11 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 	shadowmapTexCoord.x = shadowmapTexCoord.x / 2.0 + 0.5f;
 	shadowmapTexCoord.y = -shadowmapTexCoord.y / 2.0 + 0.5f;
 
-	float depthFromTex = depthTex.Sample(samplerState, shadowmapTexCoord);
-
 	const float bias = 0.00001f;	// to avoid self shadowing
-	float depthFromVertices = input.lightWvpPos.z - bias;
-	inShadow = depthFromTex < depthFromVertices;
+	input.lightWvpPos.z -= bias;
+	float lightFactor = depthTex.SampleCmpLevelZero(cmpSampler, shadowmapTexCoord, input.lightWvpPos.z);
+	float depthFromVertices = input.lightWvpPos.z;
+	inShadow = lightFactor <= 0.0f;
 
 	if (inShadow)
 	{
@@ -70,12 +71,12 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 	else
 	{
 		float3 lightVec = normalize(input.pos.xyz - lightWorldPos);
-		float diffuse = dot(-lightVec, input.normal);
+		float diffuse = clamp(dot(-lightVec, input.normal), 0.0f, 1.0f);
 		float3 cameraDir = normalize(cameraPos - float3(input.pos[0], input.pos[1], input.pos[2]));
 		float3 specularDir = lightVec - 2 * dot(lightVec, input.normal) * input.normal;
 		float specular = clamp(dot(specularDir, cameraDir), 0.0f, 1.0f);
 		specular = pow(specular, 16);
-		return clamp(baseColor * (ambient + 0.8 * diffuse + 5.0f * specular), 0.0f, 1.0f);
+		return clamp(baseColor * (ambient + lightFactor * (0.8 * diffuse + 5.0f * specular)), 0.0f, 1.0f);
 	}
 }
 

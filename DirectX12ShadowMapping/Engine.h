@@ -90,6 +90,7 @@ private:
 	ComPtr<ID3D12Resource> m_dsBuffer;
 
 	ComPtr<ID3D12DescriptorHeap> m_dsLightDescriptorHeap;
+	ComPtr<ID3D12DescriptorHeap> m_lightSamplerDescriptorHeap;
 	ComPtr<ID3D12Resource> m_dsLightBuffer;
 
 	// constant buffers
@@ -129,6 +130,7 @@ private:
 	void InitWvp();
 	void UpdateWvp(float deltaSec);
 	void CreateConstantBuffers();
+	void CreateSamplers();
 
 	void RenderLightDepth();
 	void RenderScene();
