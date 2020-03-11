@@ -42,6 +42,7 @@ extern const XMVECTOR Z_UNIT_VEC;
 class Engine
 {
 private:
+	UINT m_shadowMapRes;
 	UINT m_resolutionWidth;
 	UINT m_resolutionHeight;
 	HWND m_hwnd;
@@ -83,7 +84,9 @@ private:
 	ComPtr<ID3DBlob> m_lightPixelShader;
 	ComPtr<ID3DBlob> m_lightVertexShader;
 	D3D12_VIEWPORT m_viewport;
+	D3D12_VIEWPORT m_lightViewport;
 	D3D12_RECT m_scissorRect;
+	D3D12_RECT m_lightDepthScissorRect;
 
 	// depth/stencil buffer
 	ComPtr<ID3D12DescriptorHeap> m_dsDescriptorHeap;

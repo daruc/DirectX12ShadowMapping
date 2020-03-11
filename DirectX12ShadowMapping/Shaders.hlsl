@@ -60,7 +60,24 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 
 	const float bias = 0.00001f;	// to avoid self shadowing
 	input.lightWvpPos.z -= bias;
-	float lightFactor = depthTex.SampleCmpLevelZero(cmpSampler, shadowmapTexCoord, input.lightWvpPos.z);
+
+
+	float lightFactor = 0.0f;
+	const float shadowMapRes = 1024.0f;
+
+	for (float y = -0.5f; y <= 0.5f; ++y)
+	{
+		for (float x = -0.5f; x <= 0.5f; ++x)
+		{
+			float2 offset;
+			offset.x = x / shadowMapRes;
+			offset.y = y / shadowMapRes;
+			lightFactor += depthTex.SampleCmpLevelZero(cmpSampler, shadowmapTexCoord + offset, input.lightWvpPos.z);
+		}
+	}
+
+	lightFactor /= 4.0f;
+
 	float depthFromVertices = input.lightWvpPos.z;
 	inShadow = lightFactor <= 0.0f;
 
@@ -75,7 +92,7 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 		float3 cameraDir = normalize(cameraPos - float3(input.pos[0], input.pos[1], input.pos[2]));
 		float3 specularDir = lightVec - 2 * dot(lightVec, input.normal) * input.normal;
 		float specular = clamp(dot(specularDir, cameraDir), 0.0f, 1.0f);
-		specular = pow(specular, 16);
+		specular = pow(specular, 8);
 		return clamp(baseColor * (ambient + lightFactor * (0.8 * diffuse + 5.0f * specular)), 0.0f, 1.0f);
 	}
 }
@@ -90,7 +107,7 @@ VS_OUTPUT vsDepth(VS_INPUT input)
 	return output;
 }
 
-float4 psDepth(VS_OUTPUT input) : SV_TARGET
+void psDepth(VS_OUTPUT input)
 {
-	return float4(0.0f, 0.0f, 0.0f, 1.0f);
+	// only depth
 }

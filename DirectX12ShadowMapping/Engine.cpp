@@ -14,6 +14,7 @@ const XMVECTOR Z_UNIT_VEC = XMLoadFloat3(&Z_UNIT_VEC_FLOAT);
 Engine::Engine(UINT resolutionWidth, UINT resolutionHeight)
 	: m_resolutionWidth(resolutionWidth), m_resolutionHeight(resolutionHeight)
 {
+	m_shadowMapRes = 1024;
 }
 
 
@@ -182,28 +183,12 @@ void Engine::CreateLightRootSignature()
 	rootDescriptor.ShaderRegister = 0;
 	rootDescriptor.RegisterSpace = 0;
 
-	D3D12_ROOT_PARAMETER rootParameters[2];
+	D3D12_ROOT_PARAMETER rootParameters[1];
 
 	// WVP matrix
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 	rootParameters[0].Descriptor = rootDescriptor;
 	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	// texture
-	D3D12_DESCRIPTOR_RANGE descriptorRanges[1];
-	descriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	descriptorRanges[0].NumDescriptors = 1;
-	descriptorRanges[0].BaseShaderRegister = 0;
-	descriptorRanges[0].RegisterSpace = 0;
-	descriptorRanges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-	D3D12_ROOT_DESCRIPTOR_TABLE descriptorTable;
-	descriptorTable.NumDescriptorRanges = _countof(descriptorRanges);
-	descriptorTable.pDescriptorRanges = &descriptorRanges[0];
-
-	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	rootParameters[1].DescriptorTable = descriptorTable;
-	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 	// sampler
 	D3D12_STATIC_SAMPLER_DESC sampler = {};
@@ -773,7 +758,7 @@ void Engine::CreateLightDepthBuffer()
 	hr = m_device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
 		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_resolutionWidth, m_resolutionHeight, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_shadowMapRes, m_shadowMapRes, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
 		D3D12_RESOURCE_STATE_DEPTH_WRITE,
 		&depthOptimizedClearValue,
 		IID_PPV_ARGS(&m_dsLightBuffer)
@@ -797,10 +782,22 @@ void Engine::FillOutViewportAndScissorRect()
 	m_viewport.MinDepth = 0.0f;
 	m_viewport.MaxDepth = 1.0f;
 
+	m_lightViewport.TopLeftX = 0;
+	m_lightViewport.TopLeftY = 0;
+	m_lightViewport.Width = static_cast<float>(m_shadowMapRes);
+	m_lightViewport.Height = static_cast<float>(m_shadowMapRes);
+	m_lightViewport.MinDepth = 0.0f;
+	m_lightViewport.MaxDepth = 1.0f;
+
 	m_scissorRect.left = 0;
 	m_scissorRect.top = 0;
 	m_scissorRect.right = m_resolutionWidth;
 	m_scissorRect.bottom = m_resolutionHeight;
+
+	m_lightDepthScissorRect.left = 0;
+	m_lightDepthScissorRect.top = 0;
+	m_lightDepthScissorRect.right = m_shadowMapRes;
+	m_lightDepthScissorRect.bottom = m_shadowMapRes;
 }
 
 void Engine::CreateConstantBuffers()
@@ -1047,6 +1044,18 @@ void Engine::Init(HWND hwnd)
 	swapChain.As(&m_swapChain);
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
+	// create swap chain for light
+	DXGI_SWAP_CHAIN_DESC1 lightSwapChainDesc = {};
+	lightSwapChainDesc.Height = m_shadowMapRes;
+	lightSwapChainDesc.Width = m_shadowMapRes;
+	lightSwapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	lightSwapChainDesc.Stereo = FALSE;
+	lightSwapChainDesc.SampleDesc.Count = 1;
+	lightSwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	lightSwapChainDesc.BufferCount = 2;	// double buffering
+	lightSwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	
+
 	// create descriptor heaps
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
@@ -1212,6 +1221,11 @@ void Engine::RenderScene()
 
 	// record commands
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+
+	// indicate that the back buffer will be used as a render target
+	m_commandList->ResourceBarrier(1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	const float clearColor[] = { 0.5f, 0.5f, 0.5f, 1.0f };
 	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
@@ -1259,33 +1273,25 @@ void Engine::RenderLightDepth()
 		exit(-1);
 	}
 
-	// indicate that the back buffer will be used as a render target
-	m_lightCommandList->ResourceBarrier(1,
-		&CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
 	CD3DX12_CPU_DESCRIPTOR_HANDLE lightDsvHandle(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
 	// record commands
-	m_lightCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &lightDsvHandle);
-	const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-	m_lightCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	m_lightCommandList->OMSetRenderTargets(0, nullptr, false, &lightDsvHandle);
 	m_lightCommandList->ClearDepthStencilView(m_dsLightDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
 	m_lightCommandList->SetGraphicsRootSignature(m_lightRootSignature.Get());
 
 	// constant buffer descriptor heap
-	ID3D12DescriptorHeap* descriptorHeaps[] = { m_textureDescriptorHeap.Get() };
-	m_lightCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	m_lightCommandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
-	m_lightCommandList->SetGraphicsRootDescriptorTable(1, m_textureDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-	m_lightCommandList->RSSetViewports(1, &m_viewport);
-	m_lightCommandList->RSSetScissorRects(1, &m_scissorRect);
+	m_lightCommandList->SetGraphicsRootConstantBufferView(0, m_cbWvpUploadHeap[m_frameIndex]->GetGPUVirtualAddress());
+
+	m_lightCommandList->RSSetViewports(1, &m_lightViewport);
+	m_lightCommandList->RSSetScissorRects(1, &m_lightDepthScissorRect);
 	m_lightCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_lightCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 	m_lightCommandList->IASetIndexBuffer(&m_indexBufferView);
 	m_lightCommandList->DrawIndexedInstanced(m_actor.GetIndices().size(), 1, 0, 0, 0);
+
 
 	hr = m_lightCommandList->Close();
 	if (FAILED(hr))

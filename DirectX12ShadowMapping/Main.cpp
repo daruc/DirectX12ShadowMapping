@@ -5,7 +5,7 @@
 #include <WinUser.h>
 #include <windowsx.h>
 
-const UINT g_width = 600;
+const UINT g_width = 800;
 const UINT g_height = 600;
 Engine g_engine(g_width, g_height);
 
