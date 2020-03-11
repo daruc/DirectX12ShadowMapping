@@ -574,7 +574,7 @@ void Engine::CreateLightPso()
 
 void Engine::CreateVertexBuffer()
 {
-	m_actor.LoadObjFromFile(TEXT("ATV\\ATV.obj"));
+	m_actor.LoadObjFromFile(TEXT("ATV\\ATV_ground.obj"));
 
 	std::vector<WaveFrontReader<DWORD>::Vertex>& verticles = m_actor.GetVerticles();
 	int vBufferSize = verticles.size() * sizeof(WaveFrontReader<DWORD>::Vertex);
