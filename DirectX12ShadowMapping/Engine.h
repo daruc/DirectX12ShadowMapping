@@ -33,6 +33,9 @@ struct Wvp
 	BYTE padding[4];
 	XMFLOAT4X4 lightWvp;
 	XMFLOAT3 lightWorldPos;
+	BYTE padding2[4];
+	XMFLOAT3 lightDirection;
+	float lightFov;
 };
 
 extern const XMVECTOR X_UNIT_VEC;

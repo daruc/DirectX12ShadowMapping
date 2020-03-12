@@ -51,12 +51,17 @@ void Light::SetRotation(const XMFLOAT3 * const rotationVec)
 	UpdateViewProjectionMat();
 }
 
-XMVECTOR Light::GetDirection() const
-{
-	return m_directionVec;
-}
-
 XMMATRIX Light::GetViewProjectionMat() const
 {
 	return m_viewProjectionMat;
+}
+
+float Light::GetFov() const
+{
+	return m_fov;
+}
+
+XMVECTOR Light::GetDirectionVec() const
+{
+	return m_directionVec;
 }

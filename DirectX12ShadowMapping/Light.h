@@ -23,7 +23,8 @@ public:
 	void SetTranslation(const XMFLOAT3* const translationVec);
 	void SetRotation(const XMFLOAT3* const rotationVec);
 	XMVECTOR GetTranslation() const;
-	XMVECTOR GetDirection() const;
+	XMVECTOR GetDirectionVec() const;
 	XMMATRIX GetViewProjectionMat() const;
+	float GetFov() const;
 };
 

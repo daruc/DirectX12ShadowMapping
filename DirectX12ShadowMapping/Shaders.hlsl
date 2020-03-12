@@ -8,6 +8,7 @@ struct VS_INPUT
 struct VS_OUTPUT
 {
 	float4 pos : WORLD_POS;
+	float3 worldPos : WORLD_POS1;
 	float4 lightWvpPos : TEXCOORD1;
 	float4 wvpPos : SV_POSITION;
 	float3 normal : NORMAL;
@@ -21,6 +22,8 @@ cbuffer WvpConstantBuffer : register(b0)
 	float3 cameraPos;
 	float4x4 lightWvp;
 	float3 lightWorldPos;
+	float3 lightDirection;	// light's normalized camera forward vector
+	float lightFov;
 };
 
 Texture2D tex : register(t0);
@@ -34,6 +37,8 @@ VS_OUTPUT vsMain(VS_INPUT input)
 
 	output.pos = float4(input.pos, 1.0f);
 	output.wvpPos = mul(output.pos, wvp);
+
+	output.worldPos = mul(output.pos, world);
 
 	float3 worldNormal = mul(input.normal, world);
 	output.normal = worldNormal;
@@ -79,7 +84,11 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 	lightFactor /= 4.0f;
 
 	float depthFromVertices = input.lightWvpPos.z;
-	inShadow = lightFactor <= 0.0f;
+	float3 lightVec = normalize(input.worldPos - lightWorldPos);
+
+	inShadow = lightFactor <= 0.0f ||
+		(dot(lightDirection, lightVec) < cos(lightFov / 2.0f));
+
 
 	if (inShadow)
 	{
@@ -87,9 +96,8 @@ float4 psMain(VS_OUTPUT input) : SV_TARGET
 	}
 	else
 	{
-		float3 lightVec = normalize(input.pos.xyz - lightWorldPos);
 		float diffuse = clamp(dot(-lightVec, input.normal), 0.0f, 1.0f);
-		float3 cameraDir = normalize(cameraPos - float3(input.pos[0], input.pos[1], input.pos[2]));
+		float3 cameraDir = normalize(cameraPos - input.pos.xyz);
 		float3 specularDir = lightVec - 2 * dot(lightVec, input.normal) * input.normal;
 		float specular = clamp(dot(specularDir, cameraDir), 0.0f, 1.0f);
 		specular = pow(specular, 8);
@@ -109,5 +117,5 @@ VS_OUTPUT vsDepth(VS_INPUT input)
 
 void psDepth(VS_OUTPUT input)
 {
-	// only depth
+	// depth only
 }

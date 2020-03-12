@@ -883,7 +883,7 @@ void Engine::InitWvp()
 	// light direction
 	const XMFLOAT3 lightRotation(XM_PIDIV4, XM_PIDIV4, 0.0f);
 	m_light.SetRotation(&lightRotation);
-	m_light.SetProperties(XM_PIDIV4, 1000.0f);
+	m_light.SetProperties(60.0f * (XM_PI / 180.0f), 1000.0f);
 
 	const XMFLOAT3 lightTranslation(-80.0f, 120.0f, -80.0f);
 	m_light.SetTranslation(&lightTranslation);
@@ -892,17 +892,20 @@ void Engine::InitWvp()
 	m_camera.SetAspectRatio(aspectRatio);
 
 	// World-View-Projection matrix
+	XMMATRIX worldTransposedMat = XMMatrixTranspose(m_actor.GetWorldMat());
 	XMMATRIX wvpMat = m_actor.GetWorldMat() * m_camera.GetViewProjectionMat();
 	XMMATRIX wvpTransposedMat = XMMatrixTranspose(wvpMat);
 
 	XMMATRIX lightWvpMat = m_actor.GetWorldMat() * m_light.GetViewProjectionMat();
 	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
 
-	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
+	XMStoreFloat4x4(&m_wvpData.world, worldTransposedMat);
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpTransposedMat);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
 	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
 	XMStoreFloat3(&m_wvpData.lightWorldPos, m_light.GetTranslation());
+	XMStoreFloat3(&m_wvpData.lightDirection, m_light.GetDirectionVec());
+	m_wvpData.lightFov = m_light.GetFov();
 }
 
 void Engine::UpdateWvp(float deltaSec)
@@ -960,17 +963,20 @@ void Engine::UpdateWvp(float deltaSec)
 
 	//m_actor.RotateRoll(deltaSec);
 
+	XMMATRIX worldTransposedMat = XMMatrixTranspose(m_actor.GetWorldMat());
 	XMMATRIX wvpMat = m_actor.GetWorldMat() * m_camera.GetViewProjectionMat();
 	XMMATRIX wvpMatTransposed = XMMatrixTranspose(wvpMat);
 
 	XMMATRIX lightWvpMat = m_actor.GetWorldMat() * m_light.GetViewProjectionMat();
 	XMMATRIX lightWvpTransposedMat = XMMatrixTranspose(lightWvpMat);
 
-	XMStoreFloat4x4(&m_wvpData.world, m_actor.GetWorldMat());
+	XMStoreFloat4x4(&m_wvpData.world, worldTransposedMat);
 	XMStoreFloat4x4(&m_wvpData.wvp, wvpMatTransposed);
 	XMStoreFloat3(&m_wvpData.cameraPos, m_camera.GetPosition());
 	XMStoreFloat4x4(&m_wvpData.lightWvp, lightWvpTransposedMat);
 	XMStoreFloat3(&m_wvpData.lightWorldPos, m_light.GetTranslation());
+	XMStoreFloat3(&m_wvpData.lightDirection, m_light.GetDirectionVec());
+	m_wvpData.lightFov = m_light.GetFov();
 }
 
 void Engine::Init(HWND hwnd)
